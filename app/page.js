@@ -1,9 +1,15 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import {
+  collection,
+  doc,
+  onSnapshot,
+  serverTimestamp,
+  setDoc,
+} from 'firebase/firestore';
 import { leaderboardData as defaultLeaderboardData } from '../data/leaderboard';
-
-const STORAGE_KEY = 'kartbrosLeaderboardData';
+import { db } from '../lib/firebase';
 
 function formatTime(seconds) {
   if (seconds == null || Number.isNaN(seconds)) return '-';
@@ -21,46 +27,6 @@ function sortTrackEntries(entries) {
     if (b.bestTotal == null) return -1;
     return a.bestTotal - b.bestTotal;
   });
-}
-
-function mergePayloadIntoLeaderboard(currentData, payload) {
-  if (!payload || !payload.player || !Array.isArray(payload.times)) {
-    return currentData;
-  }
-
-  const nextData = { ...currentData };
-
-  for (const timeEntry of payload.times) {
-    if (!timeEntry?.track) continue;
-
-    const track = timeEntry.track;
-    const existingEntries = Array.isArray(nextData[track]) ? [...nextData[track]] : [];
-    const existingIndex = existingEntries.findIndex(
-      (entry) => entry.player === payload.player
-    );
-
-    const newPlayerEntry = {
-      player: payload.player,
-      bestLap:
-        typeof timeEntry.bestLapSeconds === 'number'
-          ? timeEntry.bestLapSeconds
-          : null,
-      bestTotal:
-        typeof timeEntry.bestTotalSeconds === 'number'
-          ? timeEntry.bestTotalSeconds
-          : null,
-    };
-
-    if (existingIndex >= 0) {
-      existingEntries[existingIndex] = newPlayerEntry;
-    } else {
-      existingEntries.push(newPlayerEntry);
-    }
-
-    nextData[track] = existingEntries;
-  }
-
-  return nextData;
 }
 
 function readPayloadFromUrl() {
@@ -82,46 +48,99 @@ function readPayloadFromUrl() {
   }
 }
 
+async function writePayloadToFirestore(payload) {
+  if (!payload || !payload.player || !Array.isArray(payload.times)) return;
+
+  const playerId = payload.player.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+
+  await setDoc(
+    doc(db, 'players', playerId),
+    {
+      player: payload.player,
+      exportedAt: payload.exportedAt || null,
+      updatedAt: serverTimestamp(),
+      times: payload.times,
+    },
+    { merge: true }
+  );
+}
+
+function convertPlayersToLeaderboard(players) {
+  const nextData = {};
+
+  for (const playerRecord of players) {
+    const playerName = playerRecord.player;
+    const times = Array.isArray(playerRecord.times) ? playerRecord.times : [];
+
+    for (const timeEntry of times) {
+      if (!timeEntry?.track) continue;
+
+      if (!nextData[timeEntry.track]) {
+        nextData[timeEntry.track] = [];
+      }
+
+      nextData[timeEntry.track].push({
+        player: playerName,
+        bestLap:
+          typeof timeEntry.bestLapSeconds === 'number'
+            ? timeEntry.bestLapSeconds
+            : null,
+        bestTotal:
+          typeof timeEntry.bestTotalSeconds === 'number'
+            ? timeEntry.bestTotalSeconds
+            : null,
+      });
+    }
+  }
+
+  return nextData;
+}
+
 export default function HomePage() {
   const [leaderboard, setLeaderboard] = useState(defaultLeaderboardData);
   const [statusMessage, setStatusMessage] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    try {
-      const savedData = window.localStorage.getItem(STORAGE_KEY);
-      let baseData = defaultLeaderboardData;
+    let unsub = null;
 
-      if (savedData) {
-        baseData = JSON.parse(savedData);
+    async function setup() {
+      try {
+        const payload = readPayloadFromUrl();
+
+        if (payload) {
+          await writePayloadToFirestore(payload);
+          setStatusMessage(`Imported times for ${payload.player}.`);
+
+          const cleanUrl = new URL(window.location.href);
+          cleanUrl.searchParams.delete('payload');
+          window.history.replaceState({}, '', cleanUrl.toString());
+        }
+
+        unsub = onSnapshot(collection(db, 'players'), (snapshot) => {
+          const players = snapshot.docs.map((docSnapshot) => docSnapshot.data());
+          const nextLeaderboard = convertPlayersToLeaderboard(players);
+          setLeaderboard(nextLeaderboard);
+          setIsLoading(false);
+        });
+      } catch (error) {
+        console.error(error);
+        setLeaderboard(defaultLeaderboardData);
+        setStatusMessage('Could not load shared leaderboard data.');
+        setIsLoading(false);
       }
-
-      const payload = readPayloadFromUrl();
-
-      if (payload) {
-        const mergedData = mergePayloadIntoLeaderboard(baseData, payload);
-        setLeaderboard(mergedData);
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(mergedData));
-        setStatusMessage(`Imported times for ${payload.player}.`);
-
-        const cleanUrl = new URL(window.location.href);
-        cleanUrl.searchParams.delete('payload');
-        window.history.replaceState({}, '', cleanUrl.toString());
-      } else {
-        setLeaderboard(baseData);
-      }
-    } catch {
-      setLeaderboard(defaultLeaderboardData);
-      setStatusMessage('Could not load saved leaderboard data.');
     }
+
+    setup();
+
+    return () => {
+      if (typeof unsub === 'function') {
+        unsub();
+      }
+    };
   }, []);
 
   const tracks = useMemo(() => Object.entries(leaderboard), [leaderboard]);
-
-  function clearLeaderboard() {
-    window.localStorage.removeItem(STORAGE_KEY);
-    setLeaderboard(defaultLeaderboardData);
-    setStatusMessage('Leaderboard data cleared from this browser.');
-  }
 
   return (
     <main className="page-shell">
@@ -133,19 +152,19 @@ export default function HomePage() {
             Click any track below to expand the rankings and compare best lap and total time.
           </p>
 
-          <div className="hero-actions">
-            <button className="clear-button" onClick={clearLeaderboard}>
-              Clear saved data
-            </button>
-            {statusMessage ? <p className="status-message">{statusMessage}</p> : null}
-          </div>
+          {statusMessage ? <p className="status-message">{statusMessage}</p> : null}
         </header>
 
-        {tracks.length === 0 ? (
+        {isLoading ? (
+          <section className="empty-state">
+            <h2>Loading leaderboard...</h2>
+            <p>Please wait while the latest times are loaded.</p>
+          </section>
+        ) : tracks.length === 0 ? (
           <section className="empty-state">
             <h2>No leaderboard data yet</h2>
             <p>
-              Once a bookmarklet sends player times here, the rankings will appear automatically.
+              Once a bookmarklet sends player times here, the rankings will appear automatically for everyone.
             </p>
           </section>
         ) : (
