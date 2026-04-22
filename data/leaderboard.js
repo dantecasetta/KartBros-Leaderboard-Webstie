@@ -1,6 +1,1 @@
-export const leaderboardData = {
-  city: [],
-  desert: [],
-  forest: [],
-  snow: [],
-};
+export const leaderboardData = {};
