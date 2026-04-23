@@ -99,6 +99,7 @@ function convertPlayersToLeaderboard(players) {
 export default function HomePage() {
   const [leaderboard, setLeaderboard] = useState(defaultLeaderboardData);
   const [statusMessage, setStatusMessage] = useState('');
+  const [debugMessage, setDebugMessage] = useState('Starting app...');
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -106,9 +107,11 @@ export default function HomePage() {
 
     async function setup() {
       try {
+        setDebugMessage('Reading payload from URL...');
         const payload = readPayloadFromUrl();
 
         if (payload) {
+          setDebugMessage('Writing payload to Firestore...');
           await writePayloadToFirestore(payload);
           setStatusMessage(`Imported times for ${payload.player}.`);
 
@@ -117,6 +120,7 @@ export default function HomePage() {
           window.history.replaceState({}, '', cleanUrl.toString());
         }
 
+        setDebugMessage('Listening for Firestore player updates...');
         unsub = onSnapshot(
           collection(db, 'players'),
           (snapshot) => {
@@ -124,12 +128,14 @@ export default function HomePage() {
             const nextLeaderboard = convertPlayersToLeaderboard(players);
             setLeaderboard(nextLeaderboard);
             setIsLoading(false);
+            setDebugMessage('Leaderboard data loaded.');
           },
           (error) => {
             console.error('Firestore snapshot error:', error);
             setLeaderboard(defaultLeaderboardData);
             setStatusMessage('Could not load shared leaderboard data.');
             setIsLoading(false);
+            setDebugMessage('Firestore snapshot error occurred.');
           }
         );
       } catch (error) {
@@ -137,6 +143,7 @@ export default function HomePage() {
         setLeaderboard(defaultLeaderboardData);
         setStatusMessage('Could not load shared leaderboard data.');
         setIsLoading(false);
+        setDebugMessage('Failed to initialize Firestore.');
       }
     }
 
@@ -162,6 +169,7 @@ export default function HomePage() {
           </p>
 
           {statusMessage ? <p className="status-message">{statusMessage}</p> : null}
+          {debugMessage ? <p className="status-message">{debugMessage}</p> : null}
         </header>
 
         {isLoading ? (
