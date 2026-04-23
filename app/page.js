@@ -22,10 +22,10 @@ function formatTime(seconds) {
 
 function sortTrackEntries(entries) {
   return [...entries].sort((a, b) => {
-    if (a.bestTotal == null && b.bestTotal == null) return 0;
-    if (a.bestTotal == null) return 1;
-    if (b.bestTotal == null) return -1;
-    return a.bestTotal - b.bestTotal;
+    if (a.bestLap == null && b.bestLap == null) return 0;
+    if (a.bestLap == null) return 1;
+    if (b.bestLap == null) return -1;
+    return a.bestLap - b.bestLap;
   });
 }
 
