@@ -117,12 +117,21 @@ export default function HomePage() {
           window.history.replaceState({}, '', cleanUrl.toString());
         }
 
-        unsub = onSnapshot(collection(db, 'players'), (snapshot) => {
-          const players = snapshot.docs.map((docSnapshot) => docSnapshot.data());
-          const nextLeaderboard = convertPlayersToLeaderboard(players);
-          setLeaderboard(nextLeaderboard);
-          setIsLoading(false);
-        });
+        unsub = onSnapshot(
+          collection(db, 'players'),
+          (snapshot) => {
+            const players = snapshot.docs.map((docSnapshot) => docSnapshot.data());
+            const nextLeaderboard = convertPlayersToLeaderboard(players);
+            setLeaderboard(nextLeaderboard);
+            setIsLoading(false);
+          },
+          (error) => {
+            console.error('Firestore snapshot error:', error);
+            setLeaderboard(defaultLeaderboardData);
+            setStatusMessage('Could not load shared leaderboard data.');
+            setIsLoading(false);
+          }
+        );
       } catch (error) {
         console.error(error);
         setLeaderboard(defaultLeaderboardData);
