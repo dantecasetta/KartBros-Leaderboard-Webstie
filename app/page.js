@@ -96,6 +96,25 @@ function convertPlayersToLeaderboard(players) {
   return nextData;
 }
 
+
+// Helper to compute player stats for summary
+function computePlayerStats(tracks) {
+  const stats = {};
+  tracks.forEach(([, entries]) => {
+    const sorted = sortTrackEntries(entries);
+    sorted.forEach((entry, idx) => {
+      if (!entry.player) return;
+      if (!stats[entry.player]) stats[entry.player] = { first: 0, second: 0, third: 0, points: 0 };
+      if (idx === 0) { stats[entry.player].first += 1; stats[entry.player].points += 5; }
+      else if (idx === 1) { stats[entry.player].second += 1; stats[entry.player].points += 3; }
+      else if (idx === 2) { stats[entry.player].third += 1; stats[entry.player].points += 1; }
+    });
+  });
+  return Object.entries(stats)
+    .map(([player, s]) => ({ player, ...s }))
+    .sort((a, b) => b.points - a.points || a.player.localeCompare(b.player));
+}
+
 export default function HomePage() {
   const [leaderboard, setLeaderboard] = useState(defaultLeaderboardData);
   const [statusMessage, setStatusMessage] = useState('');
@@ -157,6 +176,7 @@ export default function HomePage() {
   }, []);
 
   const tracks = useMemo(() => Object.entries(leaderboard), [leaderboard]);
+  const playerStats = useMemo(() => computePlayerStats(tracks), [tracks]);
 
   return (
     <main className="page-shell">
@@ -171,6 +191,37 @@ export default function HomePage() {
           {statusMessage ? <p className="status-message">{statusMessage}</p> : null}
           {debugMessage ? <p className="status-message">{debugMessage}</p> : null}
         </header>
+
+        {/* Player summary section */}
+        {!isLoading && tracks.length > 0 && (
+          <section className="player-summary" style={{ marginBottom: 32 }}>
+            <h2>🏆 Player Standings</h2>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Player</th>
+                    <th>🥇 1st</th>
+                    <th>🥈 2nd</th>
+                    <th>🥉 3rd</th>
+                    <th>Points</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {playerStats.map((stat) => (
+                    <tr key={stat.player}>
+                      <td>{stat.player}</td>
+                      <td>{stat.first}</td>
+                      <td>{stat.second}</td>
+                      <td>{stat.third}</td>
+                      <td>{stat.points}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
 
         {isLoading ? (
           <section className="empty-state">
